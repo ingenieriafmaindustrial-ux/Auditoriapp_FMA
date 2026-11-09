@@ -1,0 +1,36 @@
+{
+  "name": "fma-auditoriapp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "rules:deploy": "firebase deploy --only firestore:rules,firestore:indexes"
+  },
+  "dependencies": {
+    "browser-image-compression": "^2.0.2",
+    "date-fns": "^4.1.0",
+    "docx": "^9.5.1",
+    "firebase": "^12.0.0",
+    "lucide-react": "^0.525.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "tailwindcss": "^4.1.11",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
+  }
+}
