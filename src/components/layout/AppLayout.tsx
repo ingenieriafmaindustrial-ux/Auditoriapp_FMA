@@ -11,6 +11,7 @@ import { semaforoPlazo } from '../../domain/hallazgoReglas';
 import { HojasRuta, type Hoja } from './SheetTabs';
 import { MotionGrid } from '../ui/motion-grid';
 import { ThemeToggle } from '../shared/ThemeToggle';
+import { InstalarApp } from '../shared/InstalarApp';
 import { useTheme } from '../../context/ThemeContext';
 
 export function AppLayout() {
@@ -42,6 +43,7 @@ export function AppLayout() {
             <img src="/logo-app.png" alt="FMA AuditoriAPP" className="h-12 w-auto drop-shadow-[0_4px_10px_rgba(0,0,0,.45)] sm:h-14" />
           </Link>
           <div className="flex-1" />
+          <InstalarApp />
           <Recordatorios />
           <ThemeToggle />
           <img src="/logo-fma.png" alt="FMA Industrial" className="hidden h-12 w-12 rounded-md sm:block" />

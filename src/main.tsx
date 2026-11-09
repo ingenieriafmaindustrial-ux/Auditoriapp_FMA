@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import './index.css';
+import './lib/pwa';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
