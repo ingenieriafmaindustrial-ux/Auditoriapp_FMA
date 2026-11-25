@@ -1,0 +1,265 @@
+rules_version = '2';
+
+// FMA_AuditoriAPP — Reglas de seguridad de Firestore
+// Roles: auditor_lider (total), auditor_sistema (gestión), auditor (solo auditorías donde participa)
+// Probar con: firebase emulators:start  antes de desplegar.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+    function signedIn() { return request.auth != null; }
+    function userPath() { return /databases/$(database)/documents/usuarios/$(request.auth.uid); }
+    function hasProfile() { return signedIn() && exists(userPath()); }
+    function me() { return get(userPath()).data; }
+    function active() { return hasProfile() && me().activo == true; }
+    function isLider() { return active() && me().rol == 'auditor_lider'; }
+    function isGestor() { return active() && me().rol in ['auditor_lider', 'auditor_sistema']; }
+    // Administrador TI de la app (único que gestiona usuarios)
+    function isAdminTI() { return isLider() && request.auth.token.email == 'i.arelluna@fma.cl'; }
+    function myAuditorId() { return me().get('auditorId', null); }
+    // Únicas personas que pueden eliminar auditorías (incluso cerradas). Debe coincidir con ELIMINAN_AUDITORIAS (constants.ts)
+    function eliminaAuditorias() { return active() && request.auth.token.email in ['i.arelluna@fma.cl', 'c.neira@fma.cl']; }
+    // Restauración desde respaldo: solo admin TI y solo mientras config/restauracion tenga una ventana vigente (máx. 20 min)
+    function restaurando() {
+      return isAdminTI()
+        && exists(/databases/$(database)/documents/config/restauracion)
+        && get(/databases/$(database)/documents/config/restauracion).data.hasta > request.time;
+    }
+
+    // Participa: gestores ven todo; auditores solo si su auditorId está en "participantes"
+    function participa(data) {
+      return active() && (isGestor() || (myAuditorId() != null && myAuditorId() in data.participantes));
+    }
+    function auditoria(id) { return get(/databases/$(database)/documents/auditorias/$(id)).data; }
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+    function unchanged(keys) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
+    }
+    function editable(estado) { return estado in ['planificada', 'en_ejecucion', 'en_revision']; }
+    function sinInforme(auditoriaId) { return auditoria(auditoriaId).get('informeVersion', 0) == 0; }
+    function hallazgoBorrado(id) { return id != null && !existsAfter(/databases/$(database)/documents/hallazgos/$(id)); }
+
+    // ---------- Configuración / arranque ----------
+    match /config/app {
+      allow read: if signedIn();
+      // Solo se crea una vez, junto al primer usuario auditor_lider (misma escritura en lote)
+      allow create: if signedIn()
+        && getAfter(userPath()).data.rol == 'auditor_lider';
+      allow update: if isLider();
+      allow delete: if false;
+    }
+    // Último respaldo descargado (recordatorio mensual)
+    match /config/respaldo {
+      allow read: if isGestor();
+      allow write: if isGestor();
+    }
+    // Ventana de restauración
+    match /config/restauracion {
+      allow read, write: if isAdminTI();
+    }
+
+    match /usuarios/{uid} {
+      allow read: if active() || (signedIn() && request.auth.uid == uid);
+      allow create: if isAdminTI()
+        || (signedIn() && request.auth.uid == uid
+            && !exists(/databases/$(database)/documents/config/app)
+            && existsAfter(/databases/$(database)/documents/config/app)
+            && request.resource.data.rol == 'auditor_lider'
+            && request.resource.data.activo == true);
+      // El propio usuario solo puede cambiar su nombre
+      allow update: if isAdminTI()
+        || (active() && request.auth.uid == uid && onlyChanges(['nombre', 'actualizadoEn']));
+      allow delete: if false;
+    }
+
+    // ---------- Catálogos ----------
+    match /sucursales/{id} {
+      allow read: if active();
+      allow write: if isGestor();
+    }
+    match /areas/{id} {
+      allow read: if active();
+      allow write: if isGestor();
+    }
+    match /auditores/{id} {
+      allow read: if active();
+      allow write: if isGestor();
+    }
+    match /requisitos/{id} {
+      allow read: if active();
+      allow write: if isGestor();
+    }
+    match /contadores/{id} {
+      allow read, write: if isGestor();
+    }
+
+    // ---------- Auditorías ----------
+    match /auditorias/{auditoriaId} {
+      allow read: if participa(resource.data);
+      allow create: if isGestor();
+      allow update: if
+        // Gestores: todo, salvo anular o reabrir una cerrada (solo líder)
+        (isGestor()
+          && (isLider()
+              || (request.resource.data.estado != 'anulada'
+                  && (resource.data.estado != 'cerrada' || request.resource.data.estado == 'cerrada'))))
+        // Auditores participantes: solo contador de hallazgos, notas y aprobaciones
+        || (participa(resource.data)
+          && resource.data.estado != 'anulada'
+          && onlyChanges(['contadorHallazgos', 'notas', 'notasActualizadasPor', 'notasActualizadasEn', 'aprobaciones', 'plan', 'actualizadoEn']))
+        // Auditores participantes: comenzar la auditoría y enviarla al líder para revisión
+        || (participa(resource.data)
+          && resource.data.estado in ['planificada', 'en_ejecucion']
+          && request.resource.data.estado in ['en_ejecucion', 'en_revision']
+          && onlyChanges(['estado', 'notas', 'revisiones', 'fechaRealizacion', 'actualizadoEn']));
+      // Eliminar (incluso cerradas): solo personas autorizadas; la app exige motivo y lo deja en la bitácora
+      allow delete: if eliminaAuditorias();
+
+      match /checklist/{itemId} {
+        allow read: if participa(auditoria(auditoriaId));
+        allow create: if participa(auditoria(auditoriaId))
+          && auditoria(auditoriaId).estado in ['planificada', 'en_ejecucion'];
+        allow delete: if isLider() || eliminaAuditorias()
+          || (participa(auditoria(auditoriaId)) && auditoria(auditoriaId).estado in ['planificada', 'en_ejecucion']);
+        allow update: if participa(auditoria(auditoriaId))
+          && (auditoria(auditoriaId).estado in ['planificada', 'en_ejecucion']
+              || (editable(auditoria(auditoriaId).estado) && onlyChanges(['hallazgoId', 'actualizadoEn'])));
+      }
+
+      match /informes/{version} {
+        allow read: if participa(auditoria(auditoriaId));
+        allow create: if isGestor();
+        allow update: if false; // informe emitido = inmutable (RN-10)
+        allow delete: if eliminaAuditorias(); // solo al eliminar la auditoría completa
+      }
+    }
+
+    // ---------- Hallazgos ----------
+    match /hallazgos/{hallazgoId} {
+      allow read: if participa(resource.data);
+      allow create: if participa(request.resource.data)
+        && editable(auditoria(request.resource.data.auditoriaId).estado);
+      allow update: if participa(resource.data)
+        && (isGestor() || unchanged(['auditoriaId', 'correlativo', 'participantes', 'anulado'])
+            // Renumeración al eliminar un hallazgo de una auditoría abierta y sin informe emitido
+            || (onlyChanges(['correlativo', 'actualizadoEn']) && sinInforme(resource.data.auditoriaId)))
+        && (isLider() || unchanged(['anulado']))
+        // Con auditoría cerrada: el seguimiento continúa, la descripción queda bloqueada (RN-09)
+        && (editable(auditoria(resource.data.auditoriaId).estado)
+            || unchanged(['tipo', 'descripcion', 'requisitoIds', 'normas', 'nivel', 'fechaDeteccion']));
+      // Eliminar (duplicado / error): líder siempre; gestores o quien lo creó, con auditoría abierta y sin informe emitido
+      allow delete: if isLider() || eliminaAuditorias()
+        || (participa(resource.data)
+            && (isGestor() || resource.data.creadoPor == request.auth.uid)
+            && editable(auditoria(resource.data.auditoriaId).estado)
+            && sinInforme(resource.data.auditoriaId));
+    }
+
+    // ---------- Evidencias (metadata + miniatura) ----------
+    match /evidencias/{evidenciaId} {
+      allow read: if participa(resource.data);
+      allow create: if participa(request.resource.data)
+        && request.resource.data.subidoPor == request.auth.uid
+        && request.resource.data.miniatura.size() < 60000;
+      allow update: if isGestor() || (participa(resource.data) && onlyChanges(['descripcion']));
+      allow delete: if isGestor() || (participa(resource.data) && (resource.data.subidoPor == request.auth.uid || hallazgoBorrado(resource.data.hallazgoId)));
+    }
+
+    // ---------- Evidencias (imagen completa, base64) ----------
+    match /evidenciasDatos/{evidenciaId} {
+      allow read: if participa(resource.data);
+      allow create: if participa(request.resource.data)
+        && request.resource.data.datos.size() < 950000;
+      allow update: if isGestor();
+      // Al eliminar un hallazgo se borran sus fotos (la metadata se borra en la misma escritura)
+      allow delete: if isGestor() || (participa(resource.data) && (resource.data.subidoPor == request.auth.uid
+        || !existsAfter(/databases/$(database)/documents/evidencias/$(evidenciaId))));
+    }
+
+    // ---------- Aprendizaje del asistente (compartido entre todos los auditores) ----------
+    // Solo raíces de palabras y cláusulas, sin texto del hallazgo. Id = id del hallazgo.
+    match /aprendizaje/{hallazgoId} {
+      allow read: if active();
+      allow create, update: if active()
+        && request.resource.data.autorId == request.auth.uid
+        && request.resource.data.terminos is list && request.resource.data.terminos.size() <= 80
+        && request.resource.data.clausulas is list && request.resource.data.clausulas.size() <= 30
+        && exists(/databases/$(database)/documents/hallazgos/$(hallazgoId));
+      allow delete: if isGestor() || (active() && !existsAfter(/databases/$(database)/documents/hallazgos/$(hallazgoId)));
+    }
+
+    // ---------- Presencia en la sala de auditoría (quién está conectado y qué edita) ----------
+    // Id = {auditoriaId}__{uid}. Cada usuario solo escribe su propio documento y solo en auditorías donde participa.
+    match /presencia/{presenciaId} {
+      allow read: if active();
+      allow create, update: if active()
+        && request.resource.data.usuarioId == request.auth.uid
+        && presenciaId == request.resource.data.auditoriaId + '__' + request.auth.uid
+        && participa(auditoria(request.resource.data.auditoriaId));
+      allow delete: if active() && resource.data.usuarioId == request.auth.uid;
+    }
+
+    // ---------- Programa anual de auditorías ----------
+    // Todos los usuarios activos lo ven (calendario y avisos); solo gestores programan.
+    match /programa/{id} {
+      allow read: if active();
+      allow create, update: if isGestor();
+      allow delete: if isGestor();
+    }
+
+    // ---------- Firmas digitalizadas (un documento por usuario; las leen solo usuarios activos) ----------
+    match /firmas/{uid} {
+      allow read: if active();
+      allow create, update: if active() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['nombre', 'dataUrl', 'ancho', 'alto', 'actualizadoEn'])
+        && request.resource.data.dataUrl is string
+        && request.resource.data.dataUrl.size() < 150000
+        && request.resource.data.dataUrl.matches('^data:image/png;base64,.*');
+      allow delete: if (active() && request.auth.uid == uid) || isAdminTI();
+    }
+
+    // ---------- Registro automático de errores (lo lee solo el administrador TI) ----------
+    match /errores/{id} {
+      allow read, delete: if isAdminTI();
+      allow create: if active()
+        && request.resource.data.keys().hasOnly(['mes', 'origen', 'codigo', 'mensaje', 'ruta', 'detalle', 'accion', 'stack', 'version', 'dispositivo', 'usuarios', 'ultimoUsuario', 'ultimaVez', 'veces', 'revisado'])
+        && request.resource.data.mensaje is string && request.resource.data.mensaje.size() <= 1000
+        && request.resource.data.stack.size() <= 3000
+        && request.resource.data.veces == 1
+        && request.resource.data.revisado == false;
+      allow update: if (active()
+          && onlyChanges(['detalle', 'accion', 'stack', 'version', 'dispositivo', 'usuarios', 'ultimoUsuario', 'ultimaVez', 'veces', 'revisado'])
+          && request.resource.data.veces == resource.data.veces + 1
+          && request.resource.data.revisado == false
+          && request.resource.data.usuarios.size() <= 50
+          && request.resource.data.stack.size() <= 3000)
+        || (isAdminTI() && onlyChanges(['revisado', 'revisadoEn']));
+    }
+
+    // ---------- Reportes de problemas enviados por los usuarios ----------
+    match /reportes/{id} {
+      allow read, delete: if isAdminTI();
+      allow create: if active()
+        && request.resource.data.usuarioId == request.auth.uid
+        && request.resource.data.descripcion is string
+        && request.resource.data.descripcion.size() >= 5 && request.resource.data.descripcion.size() <= 2200
+        && request.resource.data.estado == 'nuevo';
+      allow update: if isAdminTI() && onlyChanges(['estado', 'revisadoEn']);
+    }
+
+    // ---------- Restauración desde respaldo (ventana temporal, solo admin TI) ----------
+    match /{documento=**} {
+      allow create, update: if restaurando();
+    }
+
+    // ---------- Bitácora (solo agregar) ----------
+    match /bitacora/{id} {
+      allow read: if participa(resource.data);
+      allow create: if active() && request.resource.data.usuarioId == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}

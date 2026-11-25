@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "evidencias",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "auditoriaId", "order": "ASCENDING" },
+        { "fieldPath": "participantes", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "bitacora",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "auditoriaId", "order": "ASCENDING" },
+        { "fieldPath": "participantes", "arrayConfig": "CONTAINS" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
