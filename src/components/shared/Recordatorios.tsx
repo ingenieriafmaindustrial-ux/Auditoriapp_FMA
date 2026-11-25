@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Bell, CalendarClock, CalendarX, ClipboardCheck, MessageSquareWarning } from 'lucide-react';
+import { AlertTriangle, Bell, Bug, CalendarClock, CalendarX, ClipboardCheck, DatabaseBackup, MessageSquareWarning } from 'lucide-react';
 import { usePendientes, type Pendiente } from '../../hooks/usePendientes';
 import { cn } from '../../lib/utils';
 
@@ -19,6 +19,8 @@ const icono = (t: Pendiente['tipo']) =>
   : t === 'observacion' ? <MessageSquareWarning className="h-4 w-4 text-sky-400" />
   : t === 'agenda' ? <CalendarClock className="h-4 w-4 text-brand" />
   : t === 'atrasada' ? <CalendarX className="h-4 w-4 text-red-400" />
+  : t === 'respaldo' ? <DatabaseBackup className="h-4 w-4 text-sky-400" />
+  : t === 'soporte' ? <Bug className="h-4 w-4 text-red-400" />
   : <AlertTriangle className="h-4 w-4 text-red-400" />;
 
 /** Campana de recordatorios del encabezado: parpadea mientras haya pendientes nuevos no vistos. */

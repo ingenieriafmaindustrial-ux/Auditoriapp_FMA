@@ -7,6 +7,9 @@ import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import './index.css';
 import './lib/pwa';
+import { instalarCapturaErrores } from './lib/errores';
+
+instalarCapturaErrores();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

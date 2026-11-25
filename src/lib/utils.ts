@@ -21,7 +21,15 @@ export function normalizar(s: string): string {
     .replace(/[̀-ͯ]/g, '');
 }
 
+/** Gancho del registro de errores (lib/errores.ts lo instala; aquí no se importa Firebase). */
+let reportador: ((e: unknown) => void) | null = null;
+export function fijarReportadorErrores(fn: (e: unknown) => void) {
+  reportador = fn;
+}
+
+/** Traduce un error a un mensaje para el usuario y lo deja registrado para el administrador. */
 export function errorMensaje(e: unknown): string {
+  reportador?.(e);
   const code = (e as { code?: string })?.code ?? '';
   const mapa: Record<string, string> = {
     'auth/invalid-credential': 'Correo o contraseña incorrectos.',

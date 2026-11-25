@@ -159,7 +159,7 @@ const GRID = '#e4e4e7';
 const BORDE = '#3f3f46';
 const AMARILLO = '#f5c400';
 
-export function construirInformeAnualPdf(d: DatosInformeAnual, logo: ImagenJpeg | null): Uint8Array {
+export function construirInformeAnualPdf(d: DatosInformeAnual, logo: ImagenJpeg | null, firmas: Record<string, ImagenJpeg> = {}): Uint8Array {
   const titulo = 'Informe anual de auditorías internas';
   const pdf = new PdfDoc(`${titulo} ${d.anio}`);
   const W = pdf.ancho;
@@ -447,14 +447,16 @@ export function construirInformeAnualPdf(d: DatosInformeAnual, logo: ImagenJpeg 
   }
 
   // ---------- Firmas ----------
-  asegurar(80);
-  y = Math.max(y + 30, Math.min(BAJO - 50, y + 40));
+  asegurar(110);
+  y = Math.max(y + 48, Math.min(BAJO - 50, y + 56));
   const fw = (ANCHO - 60) / 2;
   [
     ['Elaborado por', d.elaboradoPor],
     ['Aprobado por', d.aprobadoPor],
   ].forEach(([t, n], i) => {
     const x = M + i * (fw + 60);
+    const img = n ? firmas[n] : undefined;
+    if (img) { const ih = 34; const iw = (ih * img.ancho) / img.alto; pdf.imagen(img, x + (fw - iw) / 2, y - ih - 1, iw, ih); }
     pdf.linea(x, y, x + fw, y, BORDE, 0.8);
     pdf.texto(n || ' ', x, y + 13, 9, { bold: true, color: TEXTO, centro: fw });
     pdf.texto(t, x, y + 25, 8, { color: TENUE, centro: fw });

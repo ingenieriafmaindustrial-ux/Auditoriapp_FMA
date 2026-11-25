@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 import { CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import { abrirReporte } from '../lib/errores';
 import { cn } from '../lib/utils';
 
 type Tipo = 'ok' | 'error';
@@ -34,7 +35,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             )}
           >
             {t.tipo === 'ok' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-brand" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
-            <span className="flex-1">{t.mensaje}</span>
+            <span className="flex-1">
+              {t.mensaje}
+              {t.tipo === 'error' && (
+                <button type="button" onClick={() => { abrirReporte(t.mensaje); cerrar(t.id); }} className="mt-1 block text-xs font-semibold underline underline-offset-2 opacity-90 hover:opacity-100">
+                  Contar qué pasó
+                </button>
+              )}
+            </span>
             <button onClick={() => cerrar(t.id)} aria-label="Cerrar" className="opacity-70 hover:opacity-100">
               <X className="h-4 w-4" />
             </button>

@@ -19,6 +19,12 @@ export const AUDITOR_LIDER_NOMBRE = 'Ismael Arelluna';
 /** Administrador TI de la app: único que gestiona usuarios. */
 export const ADMIN_TI_EMAIL = 'i.arelluna@fma.cl';
 
+/** Únicas personas que pueden eliminar auditorías (incluso cerradas), siempre indicando el motivo. Debe coincidir con firestore.rules. */
+export const ELIMINAN_AUDITORIAS = ['i.arelluna@fma.cl', 'c.neira@fma.cl'];
+
+/** Motivos válidos para eliminar una auditoría (se registran en la bitácora). */
+export const MOTIVOS_ELIMINAR_AUDITORIA = ['Auditoría de prueba', 'Creada por error o duplicada', 'Datos cargados incorrectamente', 'Otro'] as const;
+
 /** Descripción de cada estado (se muestra en la hoja de auditoría). */
 export const AYUDA_ESTADOS = {
   planificada: 'Auditoría programada. Aún no se registran hallazgos.',

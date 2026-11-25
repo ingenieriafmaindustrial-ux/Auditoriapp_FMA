@@ -29,7 +29,7 @@ const MARCA = '#fdf3c4';
 const TEXTO = '#18181b';
 const TENUE = '#52525b';
 
-export function construirProgramaPdf(p: DatosProgramaPdf, logo: ImagenJpeg | null): Uint8Array {
+export function construirProgramaPdf(p: DatosProgramaPdf, logo: ImagenJpeg | null, firmas: Record<string, ImagenJpeg> = {}): Uint8Array {
   const pdf = new PdfDoc(`${p.titulo}`, { horizontal: true });
   const W = pdf.ancho;
   const H = pdf.alto;
@@ -152,11 +152,13 @@ export function construirProgramaPdf(p: DatosProgramaPdf, logo: ImagenJpeg | nul
   }
 
   // ---- Firmas ----
-  if (y + 80 > BAJO) nueva();
-  y += 24;
+  if (y + 96 > BAJO) nueva();
+  y += 36;
   const anchoF = 220;
   [[M + 60, 'Elaborado por', p.elaboradoPor], [M + ANCHO - 60 - anchoF, 'Aprobado por', p.aprobadoPor]].forEach(([x, rol, nombre]) => {
     const xx = x as number;
+    const img = firmas[String(nombre)];
+    if (img) { const fh = 34; const fw = (fh * img.ancho) / img.alto; pdf.imagen(img, xx + (anchoF - fw) / 2, y - 18, fw, fh); }
     pdf.linea(xx, y + 34, xx + anchoF, y + 34, BORDE, 0.7);
     pdf.texto(String(nombre || ' '), xx, y + 28, 9.5, { bold: true, centro: anchoF, color: TEXTO });
     pdf.texto(String(rol), xx, y + 47, 8.5, { centro: anchoF, color: TENUE });

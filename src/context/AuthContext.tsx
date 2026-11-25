@@ -10,6 +10,7 @@ import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import type { Usuario } from '../types';
 import { COL } from '../services/base';
+import { fijarUsuarioErrores } from '../lib/errores';
 
 export type EstadoSesion = 'cargando' | 'anonimo' | 'setup' | 'sin_perfil' | 'inactivo' | 'listo';
 
@@ -62,6 +63,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
     return unsub;
   }, [firebaseUser]);
+
+  // El registro de errores solo envía con un usuario activo (las reglas lo exigen)
+  useEffect(() => {
+    fijarUsuarioErrores(usuario && estado === 'listo' ? { id: usuario.id, nombre: usuario.nombre } : null);
+  }, [usuario, estado]);
 
   const value: AuthValue = {
     estado,

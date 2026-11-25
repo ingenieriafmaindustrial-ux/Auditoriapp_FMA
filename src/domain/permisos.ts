@@ -1,5 +1,5 @@
 import type { Auditoria, Rol, Usuario } from '../types';
-import { ADMIN_TI_EMAIL } from '../lib/constants';
+import { ADMIN_TI_EMAIL, ELIMINAN_AUDITORIAS } from '../lib/constants';
 
 export const esGestor = (rol: Rol | undefined) => rol === 'auditor_lider' || rol === 'auditor_sistema';
 export const esLider = (rol: Rol | undefined) => rol === 'auditor_lider';
@@ -15,4 +15,7 @@ export const puedeTrabajarAuditoria = (u: Usuario, a: Auditoria) =>
   esGestor(u.rol) || (!!u.auditorId && a.participantes.includes(u.auditorId));
 
 /** Solo el administrador TI (auditor líder con el correo configurado) gestiona usuarios. */
+/** Eliminar auditorías (incluidas las cerradas): solo las personas autorizadas, con motivo obligatorio. */
+export const puedeEliminarAuditorias = (u: Pick<Usuario, 'email' | 'rol'>) => u.rol !== 'auditor' && ELIMINAN_AUDITORIAS.includes(u.email.trim().toLowerCase());
+
 export const esAdminTI = (u: Pick<Usuario, 'email' | 'rol'>) => u.rol === 'auditor_lider' && u.email.trim().toLowerCase() === ADMIN_TI_EMAIL;

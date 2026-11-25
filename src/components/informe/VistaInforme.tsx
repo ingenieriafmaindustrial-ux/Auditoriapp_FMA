@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { NORMA_VERSION } from '../../lib/constants';
 import { fmtFecha, fmtFechaHora } from '../../lib/dates';
 import type { InformeSnapshot, RevisionDoc } from '../../types';
+import { firmaDe } from '../../lib/firmas';
 
 export const ETIQUETA_REVISION: Record<RevisionDoc['tipo'], string> = {
   envio: 'Enviada a revisión',
@@ -134,7 +135,7 @@ export function VistaInforme({ s }: { s: InformeSnapshot }) {
             return (
               <div key={rol} className="rounded border border-zinc-300 p-3 text-center">
                 <p className="text-xs font-bold uppercase">{{ auditor_lider: 'Auditor líder', equipo: 'Equipo auditor', jefe_area: 'Jefe / encargado de área' }[rol]}</p>
-                {aps.length ? aps.map((x) => <p key={x.nombre} className="mt-1 text-emerald-700">✓ {x.nombre}<br /><span className="text-xs text-zinc-500">{fmtFechaHora(x.fecha)}</span></p>) : <p className="mt-1 text-xs text-zinc-400">Pendiente</p>}
+                {aps.length ? aps.map((x) => { const f = rol === 'auditor_lider' ? firmaDe(x.nombre) : null; return <div key={x.nombre} className="mt-1">{f && <img src={f.dataUrl} alt={`Firma de ${x.nombre}`} className="mx-auto h-12 w-auto" />}<p className="text-emerald-700">✓ {x.nombre}<br /><span className="text-xs text-zinc-500">{fmtFechaHora(x.fecha)}</span></p></div>; }) : <p className="mt-1 text-xs text-zinc-400">Pendiente</p>}
               </div>
             );
           })}

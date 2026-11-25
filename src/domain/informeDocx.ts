@@ -21,6 +21,7 @@ import {
   WidthType,
 } from 'docx';
 import type { InformeSnapshot } from '../types';
+import { firmaBytes, firmaDe } from '../lib/firmas';
 
 export interface ImagenInforme {
   data: Uint8Array;
@@ -44,6 +45,19 @@ const fecha = (d: string | null) => (d ? d.split('-').reverse().join('-') : '—
 function parrafos(texto: string, opts: { bold?: boolean; size?: number; italics?: boolean } = {}): Paragraph[] {
   const lineas = (texto || '—').split(/\r?\n/);
   return lineas.map((l) => new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: l, font: FONT, size: opts.size ?? 20, bold: opts.bold, italics: opts.italics })] }));
+}
+
+/** Imagen de firma (PNG transparente) escalada a un alto dado, o null si la persona no tiene firma registrada. */
+function imagenFirma(nombre: string | null | undefined, alto: number): ImageRun | null {
+  const f = firmaDe(nombre);
+  if (!f) return null;
+  return new ImageRun({ type: 'png', data: firmaBytes(f), transformation: { width: Math.round((alto * f.ancho) / f.alto), height: alto } });
+}
+
+/** Nombre del auditor líder con su firma debajo (portada). */
+function celdaLider(nombre: string, firma: ImageRun | null): string | Paragraph[] {
+  if (!firma) return nombre;
+  return [new Paragraph({ children: [new TextRun({ text: nombre, font: FONT })] }), new Paragraph({ spacing: { before: 40 }, children: [firma] })];
 }
 
 function celda(contenido: string | Paragraph[], ancho: number, o: { header?: boolean; bold?: boolean } = {}) {
@@ -110,13 +124,16 @@ export function construirDocumentoInforme(s: InformeSnapshot, logo: Uint8Array |
   });
 
   // ---------- Portada / metadata ----------
+  // La firma del líder solo se estampa cuando el informe ya fue aprobado por él en la app.
+  const apLider = s.aprobaciones.find((x) => x.rol === 'auditor_lider');
+  const nombreLider = apLider?.nombre ?? s.auditorLider;
   const meta: [string, string | Paragraph[]][] = [
     ['Auditoría Nº', s.codigo],
     ['Sucursal', s.sucursal],
     ['Objetivos de la Auditoría', s.objetivos],
     ['Alcance', s.alcance],
     ['Normas de Referencia', s.normas.map((n) => NORMA_TXT[n] ?? n).join('\n')],
-    ['Auditor Líder', s.auditorLider],
+    ['Auditor Líder', celdaLider(s.auditorLider, apLider ? imagenFirma(nombreLider, 42) : null)],
     ['Equipo Auditor', s.equipo.length ? s.equipo.map((e) => `- ${e}`).join('\n') : '—'],
     ['Área auditada', s.area],
     ['Fecha de Realización', fecha(s.fechaRealizacion)],
@@ -129,11 +146,13 @@ export function construirDocumentoInforme(s: InformeSnapshot, logo: Uint8Array |
     rows: meta.map(([k, v]) => new TableRow({ cantSplit: true, children: [celda(k, 2800, { header: true }), celda(v, 5704)] })),
   });
 
-  const apLider = s.aprobaciones.find((x) => x.rol === 'auditor_lider');
   const apEquipo = s.aprobaciones.filter((x) => x.rol === 'equipo');
   const apJefe = s.aprobaciones.find((x) => x.rol === 'jefe_area');
-  const firma = (titulo: string, nombre: string, fechaAp?: string) => [
-    new Paragraph({ spacing: { before: 600 }, alignment: AlignmentType.CENTER, children: [new TextRun({ text: '______________________', font: FONT })] }),
+  const firma = (titulo: string, nombre: string, fechaAp?: string, img?: ImageRun | null) => [
+    img
+      ? new Paragraph({ spacing: { before: 120 }, alignment: AlignmentType.CENTER, children: [img] })
+      : new Paragraph({ spacing: { before: 600 }, alignment: AlignmentType.CENTER, children: [] }),
+    new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: '______________________', font: FONT })] }),
     new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: titulo, bold: true, font: FONT, size: 18 })] }),
     new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: nombre || ' ', font: FONT, size: 18 })] }),
     new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: fechaAp ? `Aprobado en app: ${fecha(fechaAp.slice(0, 10))}` : ' ', font: FONT, size: 14, color: '555555' })] }),
@@ -145,7 +164,7 @@ export function construirDocumentoInforme(s: InformeSnapshot, logo: Uint8Array |
       new TableRow({ children: [new TableCell({ columnSpan: 3, borders: bordes, shading: { fill: GRIS, type: ShadingType.CLEAR, color: 'auto' }, children: parrafos('Aprobación del documento', { bold: true }) })] }),
       new TableRow({
         children: [
-          new TableCell({ borders: bordes, width: { size: 2835, type: WidthType.DXA }, children: firma('Auditor Líder', apLider?.nombre ?? s.auditorLider, apLider?.fecha) }),
+          new TableCell({ borders: bordes, width: { size: 2835, type: WidthType.DXA }, children: firma('Auditor Líder', nombreLider, apLider?.fecha, apLider ? imagenFirma(nombreLider, 48) : null) }),
           new TableCell({ borders: bordes, width: { size: 2835, type: WidthType.DXA }, children: firma('Equipo auditor', apEquipo.map((x) => x.nombre).join(', ') || s.equipo.join(', '), apEquipo[0]?.fecha) }),
           new TableCell({ borders: bordes, width: { size: 2834, type: WidthType.DXA }, children: firma('Jefe de área / Encargado de área', apJefe?.nombre ?? s.auditados, apJefe?.fecha) }),
         ],
@@ -284,7 +303,7 @@ export function construirDocumentoPlan(p: DatosPlanDoc, logo: Uint8Array | null)
       }),
     ],
   });
-  const meta: [string, string][] = [
+  const meta: [string, string | Paragraph[]][] = [
     ['Año', String(p.anio)],
     ['Auditoría N°', p.codigo],
     ['Objetivo', p.objetivos],
@@ -293,6 +312,7 @@ export function construirDocumentoPlan(p: DatosPlanDoc, logo: Uint8Array | null)
     ['Fecha planificada', fecha(p.fechaPlanificada)],
     ['Normas de referencia', p.normas.map((n) => NORMA_TXT[n] ?? n).join(' · ')],
     ['Equipo auditor', [`Auditor líder: ${p.auditorLider}`, ...p.equipo.filter((e) => e !== p.auditorLider).map((e) => `Auditor: ${e}`)].join('\n')],
+    ...(firmaDe(p.auditorLider) ? [['Firma auditor líder', [new Paragraph({ children: [imagenFirma(p.auditorLider, 42)!] })]] as [string, Paragraph[]]] : []),
     ['Auditado (jefe / encargado)', p.auditados || '—'],
   ];
   const tablaMeta = new Table({

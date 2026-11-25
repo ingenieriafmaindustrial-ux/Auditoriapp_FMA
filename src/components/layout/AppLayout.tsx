@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Link, Outlet } from 'react-router-dom';
-import { Building2, CalendarDays, ClipboardList, Home, LogOut, SearchCheck, Settings, UserCircle, Users } from 'lucide-react';
+import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Bug, Building2, CalendarDays, ClipboardList, Home, LogOut, MessageSquarePlus, SearchCheck, Settings, UserCircle, Users } from 'lucide-react';
 import { usePendientes } from '../../hooks/usePendientes';
 import { useAuth, useUsuario } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
@@ -13,11 +13,16 @@ import { MotionGrid } from '../ui/motion-grid';
 import { ThemeToggle } from '../shared/ThemeToggle';
 import { InstalarApp } from '../shared/InstalarApp';
 import { useTheme } from '../../context/ThemeContext';
+import { ErrorBoundary } from '../shared/ErrorBoundary';
+import { ReportarProblema } from '../shared/ReportarProblema';
+import { abrirReporte } from '../../lib/errores';
 
 export function AppLayout() {
   const u = useUsuario();
   const { logout } = useAuth();
-  const { hallazgos } = useData();
+  const { hallazgos, soporte } = useData();
+  const { pathname } = useLocation();
+  const nSoporte = soporte.errores.filter((e) => !e.revisado).length + soporte.reportes.filter((r) => r.estado === 'nuevo').length;
   const [menu, setMenu] = useState(false);
   const { tema } = useTheme();
 
@@ -31,6 +36,7 @@ export function AppLayout() {
     { key: 'hallazgos', label: 'Hallazgos / Seguimiento', to: '/hallazgos', icon: <SearchCheck className={ic} />, badge: vencidos || undefined },
     ...(esGestor(u.rol) ? [{ key: 'catalogos', label: 'Sucursales', to: '/catalogos', icon: <Building2 className={ic} /> }] : []),
     ...(esAdminTI(u) ? [{ key: 'usuarios', label: 'Usuarios', to: '/usuarios', icon: <Users className={ic} /> }] : []),
+    ...(esAdminTI(u) ? [{ key: 'soporte', label: 'Soporte', to: '/soporte', icon: <Bug className={ic} />, badge: nSoporte || undefined }] : []),
   ];
 
   return (
@@ -60,6 +66,9 @@ export function AppLayout() {
                 <Link to="/perfil" onClick={() => setMenu(false)} className="flex items-center gap-2 px-3 py-2 hover:bg-zinc-100">
                   <Settings className="h-4 w-4" /> Mi perfil
                 </Link>
+                <button onClick={() => { setMenu(false); abrirReporte(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-zinc-100">
+                  <MessageSquarePlus className="h-4 w-4" /> Reportar un problema
+                </button>
                 <button onClick={logout} className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-600 hover:bg-zinc-100">
                   <LogOut className="h-4 w-4" /> Cerrar sesión
                 </button>
@@ -73,7 +82,10 @@ export function AppLayout() {
       </MotionGrid>
       </div>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5" style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}>
-        <Outlet />
+        <ErrorBoundary clave={pathname}>
+          <Outlet />
+        </ErrorBoundary>
+        <ReportarProblema />
       </main>
     </div>
   );

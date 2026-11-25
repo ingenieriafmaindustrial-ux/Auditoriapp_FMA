@@ -31,7 +31,7 @@ function Variacion({ actual, previo, compacta = false }: { actual: number; previ
  * Avance anual: (1) resumen por año con NC y OM separados y la variación contra el año anterior;
  * (2) matriz área × año, donde cada celda muestra el total y su desglose NC/OM (intensidad = cantidad).
  */
-export function EvolucionAnual({ anios, resumen, filas, tipo, maxFilas = 8 }: { anios: number[]; resumen: Record<number, ConteoTipo>; filas: FilaEvolucion[]; tipo: '' | 'NC' | 'OM'; maxFilas?: number }) {
+export function EvolucionAnual({ anios, resumen, filas, tipo, maxFilas = 8, conResumen = true }: { anios: number[]; resumen: Record<number, ConteoTipo>; filas: FilaEvolucion[]; tipo: '' | 'NC' | 'OM'; maxFilas?: number; conResumen?: boolean }) {
   const [todas, setTodas] = useState(false);
   const ultimo = anios[anios.length - 1];
   const previo = anios[anios.length - 2];
@@ -48,7 +48,7 @@ export function EvolucionAnual({ anios, resumen, filas, tipo, maxFilas = 8 }: { 
       <p className="text-sm text-zinc-500">Cantidad de {que} detectados cada año. Una baja respecto del año anterior se marca en verde.</p>
 
       {/* Resumen por año */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${anios.length}, minmax(0, 1fr))` }}>
+      {conResumen && <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${anios.length}, minmax(0, 1fr))` }}>
         {anios.map((y, i) => {
           const r = resumen[y];
           const tot = totalDe(r, tipo);
@@ -71,7 +71,7 @@ export function EvolucionAnual({ anios, resumen, filas, tipo, maxFilas = 8 }: { 
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {/* Matriz área × año */}
       {orden.length === 0 ? (

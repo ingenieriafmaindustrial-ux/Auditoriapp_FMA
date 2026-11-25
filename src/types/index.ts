@@ -373,3 +373,51 @@ export interface Presencia {
   ultimaSenal: ISODateTime;
   desde: ISODateTime;
 }
+
+// ---------- Soporte: registro de errores y reportes de usuarios ----------
+export interface ErrorRegistrado {
+  id: string; // {aaaa-mm}_{firma}
+  mes: string;
+  origen: 'operacion' | 'pantalla' | 'promesa' | 'render';
+  codigo: string;
+  mensaje: string;
+  ruta: string;
+  detalle: string;
+  accion: string;
+  stack: string;
+  version: string;
+  dispositivo: string;
+  usuarios: string[];
+  ultimoUsuario: string;
+  ultimaVez: ISODateTime;
+  veces: number;
+  revisado: boolean;
+  revisadoEn?: ISODateTime;
+}
+
+export interface ReporteProblema {
+  id: string;
+  usuarioId: string;
+  usuarioNombre: string;
+  fecha: ISODateTime;
+  descripcion: string;
+  ruta: string;
+  accion: string;
+  errores: { id: string; mensaje: string }[];
+  version: string;
+  dispositivo: string;
+  estado: 'nuevo' | 'revisado';
+  revisadoEn?: ISODateTime;
+}
+
+/** Último respaldo descargado (config/respaldo). */
+export interface InfoRespaldo {
+  fecha: ISODateTime;
+  usuarioId: string;
+  usuarioNombre: string;
+  tipo: 'json' | 'excel';
+  totalRegistros: number;
+  porColeccion: Record<string, number>;
+  conFotos: boolean;
+  verificado: boolean;
+}

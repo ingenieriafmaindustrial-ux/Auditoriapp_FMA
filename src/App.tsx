@@ -18,6 +18,7 @@ const CatalogosPage = lazy(() => import('./pages/catalogos/CatalogosPage'));
 const UsuariosPage = lazy(() => import('./pages/usuarios/UsuariosPage'));
 const PerfilPage = lazy(() => import('./pages/PerfilPage'));
 const CalendarioPage = lazy(() => import('./pages/calendario/CalendarioPage'));
+const SoportePage = lazy(() => import('./pages/SoportePage'));
 
 function Solo({ permitido, children }: { permitido: boolean; children: ReactNode }) {
   return permitido ? <>{children}</> : <Navigate to="/" replace />;
@@ -46,6 +47,7 @@ export default function App() {
             <Route path="catalogos" element={<Solo permitido={esGestor(usuario.rol)}><CatalogosPage /></Solo>} />
             <Route path="usuarios" element={<Solo permitido={esAdminTI(usuario)}><UsuariosPage /></Solo>} />
             <Route path="perfil" element={<PerfilPage />} />
+            <Route path="soporte" element={<Solo permitido={esAdminTI(usuario)}><SoportePage /></Solo>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

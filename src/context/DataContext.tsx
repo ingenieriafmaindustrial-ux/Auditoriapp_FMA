@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { collection, onSnapshot, query, where, type Query } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where, type Query } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { byId } from '../lib/utils';
 import { COL, listaConId } from '../services/base';
-import { esGestor } from '../domain/permisos';
+import { esAdminTI, esGestor } from '../domain/permisos';
 import { useUsuario } from './AuthContext';
-import type { Area, Auditor, Auditoria, Hallazgo, ProgramaItem, Requisito, Sucursal, Usuario } from '../types';
+import { fijarFirmas, type FirmaDoc } from '../lib/firmas';
+import type { Area, Auditor, Auditoria, ErrorRegistrado, Hallazgo, InfoRespaldo, ProgramaItem, ReporteProblema, Requisito, Sucursal, Usuario } from '../types';
 
 /**
  * Suscripciones globales en tiempo real (volumen bajo: decenas/cientos de documentos).
@@ -22,6 +23,12 @@ interface DataValue {
   hallazgos: Hallazgo[];
   /** Programa anual de auditorías (visible para todos los usuarios activos). */
   programa: ProgramaItem[];
+  /** Firmas digitalizadas registradas (para Word/PDF). */
+  firmas: FirmaDoc[];
+  /** Solo administrador TI: errores registrados y reportes de usuarios. */
+  soporte: { errores: ErrorRegistrado[]; reportes: ReporteProblema[] };
+  /** Gestores: último respaldo descargado (null = nunca). */
+  ultimoRespaldo: InfoRespaldo | null;
   mapa: {
     sucursales: Record<string, Sucursal>;
     areas: Record<string, Area>;
@@ -60,6 +67,24 @@ function useLive<T>(q: Query | null, deps: unknown[]): [T[], boolean] {
   return [data, loading];
 }
 
+function useDocumento<T>(ruta: [string, string] | null): T | null {
+  const [data, setData] = useState<T | null>(null);
+  const clave = ruta?.join('/') ?? '';
+  useEffect(() => {
+    if (!ruta) {
+      setData(null);
+      return;
+    }
+    return onSnapshot(
+      doc(db, ruta[0], ruta[1]),
+      (snap) => setData(snap.exists() ? (snap.data() as T) : null),
+      (err) => console.error('[DataContext]', err),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clave]);
+  return data;
+}
+
 export function DataProvider({ children }: { children: ReactNode }) {
   const u = useUsuario();
   const gestor = esGestor(u.rol);
@@ -84,6 +109,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [auditorias, l5] = useLive<Auditoria>(qAud, [scope]);
   const [hallazgos, l6] = useLive<Hallazgo>(qHal, [scope]);
   const [programa] = useLive<ProgramaItem>(collection(db, COL.programa), []);
+  const [firmas] = useLive<FirmaDoc>(collection(db, COL.firmas), []);
+  const admin = esAdminTI(u);
+  const [errores] = useLive<ErrorRegistrado>(admin ? collection(db, COL.errores) : null, [admin]);
+  const [reportes] = useLive<ReporteProblema>(admin ? collection(db, COL.reportes) : null, [admin]);
+  const ultimoRespaldo = useDocumento<InfoRespaldo>(gestor ? [COL.config, 'respaldo'] : null);
+  // Caché síncrona para los generadores de documentos
+  useMemo(() => fijarFirmas(firmas), [firmas]);
 
   const value = useMemo<DataValue>(() => {
     const ord = <T extends { nombre: string }>(l: T[]) => [...l].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
@@ -97,6 +129,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       auditorias: [...auditorias].sort((a, b) => b.anio - a.anio || b.numero - a.numero),
       hallazgos: [...hallazgos].sort((a, b) => (a.creadoEn < b.creadoEn ? 1 : -1)),
       programa: [...programa].sort((a, b) => a.fecha.localeCompare(b.fecha)),
+      firmas,
+      soporte: {
+        errores: [...errores].sort((a, b) => b.ultimaVez.localeCompare(a.ultimaVez)),
+        reportes: [...reportes].sort((a, b) => b.fecha.localeCompare(a.fecha)),
+      },
+      ultimoRespaldo,
       mapa: {
         sucursales: byId(sucursales),
         areas: byId(areas),
@@ -106,7 +144,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         auditorias: byId(auditorias),
       },
     };
-  }, [sucursales, areas, auditores, requisitos, usuarios, auditorias, hallazgos, programa, l1, l2, l3, l4, l5, l6]);
+  }, [sucursales, areas, auditores, requisitos, usuarios, auditorias, hallazgos, programa, firmas, errores, reportes, ultimoRespaldo, l1, l2, l3, l4, l5, l6]);
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }
