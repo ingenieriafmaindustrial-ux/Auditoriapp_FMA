@@ -4,10 +4,14 @@ import { useUsuario } from '../context/AuthContext';
 import { semaforoPlazo } from '../domain/hallazgoReglas';
 import { DIAS_AVISO_PROGRAMA, TIPO_PROGRAMA, asignadoA, construirEventos } from '../domain/programa';
 import { diasHasta, fmtFecha } from '../lib/dates';
+import { esAdminTI, esGestor } from '../domain/permisos';
+
+/** Días máximos entre respaldos antes de avisar en la campana. */
+export const DIAS_RECORDAR_RESPALDO = 30;
 
 export interface Pendiente {
   id: string;
-  tipo: 'revision' | 'observacion' | 'vencido' | 'agenda' | 'atrasada';
+  tipo: 'revision' | 'observacion' | 'vencido' | 'agenda' | 'atrasada' | 'respaldo' | 'soporte';
   titulo: string;
   detalle: string;
   to: string;
@@ -16,7 +20,7 @@ export interface Pendiente {
 /** Recordatorios del usuario: informes por aprobar (líder), auditorías devueltas, NC vencidas y auditorías programadas próximas o atrasadas. */
 export function usePendientes() {
   const u = useUsuario();
-  const { auditorias, hallazgos, programa, mapa } = useData();
+  const { auditorias, hallazgos, programa, mapa, soporte, ultimoRespaldo } = useData();
 
   return useMemo(() => {
     const items: Pendiente[] = [];
@@ -65,6 +69,33 @@ export function usePendientes() {
         items.push({ id: `atr-${e.id}`, tipo: 'atrasada', titulo: `${TIPO_PROGRAMA[e.tipo].label} ${mapa.areas[e.areaId]?.nombre ?? ''} atrasada`, detalle: `Programada para el ${fmtFecha(e.fecha)} y aún no se registra: realízala o reprográmala.`, to: `/calendario?ver=${e.id}` }),
       );
 
+    // Respaldo mensual (gestores)
+    if (esGestor(u.rol)) {
+      const dias = ultimoRespaldo ? Math.floor((Date.now() - Date.parse(ultimoRespaldo.fecha)) / 86_400_000) : null;
+      if (dias === null || dias >= DIAS_RECORDAR_RESPALDO)
+        items.push({
+          id: `resp-${ultimoRespaldo?.fecha ?? 'nunca'}-${Math.floor(Date.now() / (7 * 86_400_000))}`,
+          tipo: 'respaldo',
+          titulo: dias === null ? 'Aún no hay respaldo de datos' : `Respaldo pendiente: último hace ${dias} días`,
+          detalle: ultimoRespaldo ? `${fmtFecha(ultimoRespaldo.fecha.slice(0, 10))} por ${ultimoRespaldo.usuarioNombre}. Descarga el JSON y el Excel en Mi perfil.` : 'Descarga el JSON y el Excel en Mi perfil y guárdalos fuera del PC.',
+          to: '/perfil#respaldo',
+        });
+    }
+
+    // Soporte (administrador TI): errores nuevos y reportes de usuarios
+    if (esAdminTI(u)) {
+      const nErr = soporte.errores.filter((e) => !e.revisado).length;
+      const nRep = soporte.reportes.filter((r) => r.estado === 'nuevo').length;
+      if (nErr + nRep > 0)
+        items.push({
+          id: `sop-${nErr}-${nRep}-${soporte.errores[0]?.ultimaVez ?? ''}-${soporte.reportes[0]?.fecha ?? ''}`,
+          tipo: 'soporte',
+          titulo: [nErr ? `${nErr} error(es) nuevo(s)` : '', nRep ? `${nRep} reporte(s) de usuarios` : ''].filter(Boolean).join(' · '),
+          detalle: soporte.reportes.find((r) => r.estado === 'nuevo')?.descripcion ?? soporte.errores.find((e) => !e.revisado)?.mensaje ?? '',
+          to: '/soporte',
+        });
+    }
+
     return {
       items,
       agenda: items.filter((i) => i.tipo === 'agenda' || i.tipo === 'atrasada'),
@@ -72,5 +103,5 @@ export function usePendientes() {
       observaciones: items.filter((i) => i.tipo === 'observacion'),
       vencidos: items.filter((i) => i.tipo === 'vencido'),
     };
-  }, [u, auditorias, hallazgos, programa, mapa]);
+  }, [u, auditorias, hallazgos, programa, mapa, soporte, ultimoRespaldo]);
 }
