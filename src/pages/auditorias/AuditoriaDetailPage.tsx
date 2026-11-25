@@ -21,7 +21,7 @@ import { ahoraISO, fmtFecha, fmtFechaHora } from '../../lib/dates';
 import { cn, errorMensaje } from '../../lib/utils';
 import { hallazgoDescripcionEditable, transicionesDisponibles, validarEnvioRevisionSimple, type Transicion } from '../../domain/auditoriaReglas';
 import { construirSnapshot } from '../../domain/informe';
-import { esAdminTI, esGestor, puedeEmitirInforme } from '../../domain/permisos';
+import { esGestor, puedeEliminarAuditorias, puedeEmitirInforme } from '../../domain/permisos';
 import { cambiarEstadoAuditoria, comenzarAuditoria, devolverConObservaciones, emitirInforme, enviarARevision, fijarPlazoSeguimiento, guardarAprobaciones, guardarNotas, ConflictoNotas } from '../../services/auditorias';
 import { descargarInformeWord } from '../../services/informeExport';
 import { AuditoriaFormModal } from './AuditoriaFormModal';
@@ -160,7 +160,7 @@ export default function AuditoriaDetailPage() {
   const ultimaRev = revisiones.at(-1);
   const participo = gestor || (!!u.auditorId && a.participantes.includes(u.auditorId));
   const esRevisor = u.rol === 'auditor_lider' || soyLider;
-  const puedeEliminar = esAdminTI(u);
+  const puedeEliminar = puedeEliminarAuditorias(u);
 
   /** Guarda mis notas sin pisar las de otro auditor; si hubo cambios ajenos muestra el conflicto. */
   const guardarMisNotas = async (texto = notas, base = notasBase) => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Save } from 'lucide-react';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import { Button, Card, ErrorList, Field, Input, PageHeader } from '../components/ui';
@@ -8,8 +8,10 @@ import { useToast } from '../context/ToastContext';
 import { ROLES } from '../lib/constants';
 import { errorMensaje } from '../lib/utils';
 import { actualizarMiNombre } from '../services/usuarios';
-import { esGestor } from '../domain/permisos';
+import { esAdminTI, esGestor } from '../domain/permisos';
 import { RespaldoCard } from '../components/shared/RespaldoCard';
+import { FirmaCard } from '../components/shared/FirmaCard';
+import { RestaurarCard } from '../components/shared/RestaurarCard';
 
 export default function PerfilPage() {
   const u = useUsuario();
@@ -22,6 +24,10 @@ export default function PerfilPage() {
   const [repetir, setRepetir] = useState('');
   const [errores, setErrores] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  // Enlace desde la campana (/perfil#respaldo): llevar a la tarjeta
+  useEffect(() => {
+    if (location.hash) setTimeout(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+  }, []);
 
   async function cambiarPassword() {
     const e: string[] = [];
@@ -59,7 +65,9 @@ export default function PerfilPage() {
           <Button variant="primary" className="ml-auto" loading={loading} disabled={!actual || !nueva} onClick={cambiarPassword}>Cambiar contraseña</Button>
         </div>
       </Card>
+      <FirmaCard />
       {esGestor(u.rol) && <RespaldoCard />}
+      {esAdminTI(u) && <RestaurarCard />}
     </div>
   );
 }

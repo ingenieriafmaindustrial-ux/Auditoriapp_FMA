@@ -288,7 +288,8 @@ export async function devolverConObservaciones(u: Usuario, a: Auditoria, observa
  * Eliminar auditoría (solo auditor líder y solo si no tiene informe emitido).
  * Borra hallazgos, evidencias y checklist asociados. Con informe emitido corresponde ANULAR (trazabilidad ISO 7.5).
  */
-export async function eliminarAuditoria(u: Usuario, a: Auditoria) {
+export async function eliminarAuditoria(u: Usuario, a: Auditoria, motivo: string) {
+  if (motivo.trim().length < 10) throw new Error('Indica el motivo de la eliminación (mínimo 10 caracteres).');
   const refs: ReturnType<typeof doc>[] = [];
   for (const col of [COL.hallazgos, COL.evidencias, COL.evidenciasDatos, COL.aprendizaje]) {
     const snap = await getDocs(query(collection(db, col), where('auditoriaId', '==', a.id)));
@@ -305,6 +306,6 @@ export async function eliminarAuditoria(u: Usuario, a: Auditoria) {
   }
   const batch = writeBatch(db);
   batch.delete(doc(db, COL.auditorias, a.id));
-  registrarBitacora(batch, u, { entidad: 'auditoria', entidadId: a.id, auditoriaId: null, participantes: [], accion: 'eliminar', detalle: `Auditoría ${a.codigo} eliminada (estado ${a.estado}, informe v${a.informeVersion}, ${refs.length} registros asociados)` });
+  registrarBitacora(batch, u, { entidad: 'auditoria', entidadId: a.id, auditoriaId: null, participantes: [], accion: 'eliminar', detalle: `Auditoría ${a.codigo} eliminada (estado ${a.estado}, informe v${a.informeVersion}, ${refs.length} registros asociados). Motivo: ${motivo.trim()}` });
   await batch.commit();
 }

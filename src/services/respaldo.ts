@@ -1,10 +1,10 @@
 // Respaldo completo de la base de datos: JSON (restaurable / auditable) y Excel estructurado (lectura humana).
 // Lee directo de Firestore (no del estado en pantalla) para no omitir colecciones ni subcolecciones.
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { COL } from './base';
 import { descargarBlob } from './informeExport';
-import type { Usuario } from '../types';
+import type { InfoRespaldo, Usuario } from '../types';
 
 export type Doc = { id: string } & Record<string, unknown>;
 export interface Respaldo {
@@ -20,7 +20,7 @@ export interface Respaldo {
   errores: Record<string, string>;
 }
 
-const COLECCIONES = [COL.config, COL.usuarios, COL.sucursales, COL.areas, COL.auditores, COL.requisitos, COL.contadores, COL.auditorias, COL.hallazgos, COL.programa, COL.evidencias, COL.aprendizaje, COL.bitacora];
+const COLECCIONES = [COL.config, COL.usuarios, COL.firmas, COL.sucursales, COL.areas, COL.auditores, COL.requisitos, COL.contadores, COL.auditorias, COL.hallazgos, COL.programa, COL.evidencias, COL.aprendizaje, COL.bitacora];
 
 async function leer(ruta: string): Promise<Doc[]> {
   // config solo permite leer su documento 'app' (no listar la colección)
@@ -62,12 +62,62 @@ export async function leerRespaldo(u: Usuario, incluirFotos: boolean, progreso: 
 
 const sello = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
 
-export function descargarRespaldoJson(r: Respaldo) {
-  const blob = new Blob([JSON.stringify(r, null, 1)], { type: 'application/json' });
-  descargarBlob(blob, `Respaldo FMA AuditoriAPP ${sello(new Date(r.generado))}.json`);
+/** Resultado de la verificación de un respaldo descargado. */
+export interface VerificacionRespaldo {
+  ok: boolean;
+  tipo: 'json' | 'excel';
+  bytes: number;
+  totalRegistros: number;
+  porColeccion: Record<string, number>;
+  subcolecciones: { checklist: number; informes: number };
+  problemas: string[];
 }
 
-export async function descargarRespaldoExcel(r: Respaldo) {
+const contar = (r: Respaldo) => {
+  const porColeccion = Object.fromEntries(Object.entries(r.colecciones).map(([k, v]) => [k, v.length]));
+  const sub = { checklist: 0, informes: 0 };
+  for (const [ruta, docs] of Object.entries(r.subcolecciones)) {
+    if (ruta.endsWith('/checklist')) sub.checklist += docs.length;
+    else if (ruta.endsWith('/informes')) sub.informes += docs.length;
+  }
+  const totalRegistros = Object.values(porColeccion).reduce((a, b) => a + b, 0) + sub.checklist + sub.informes;
+  return { porColeccion, sub, totalRegistros };
+};
+
+/** Descarga el JSON y lo verifica: se vuelve a leer el texto generado y se comparan las cantidades una por una. */
+export function descargarRespaldoJson(r: Respaldo): VerificacionRespaldo {
+  const texto = JSON.stringify(r, null, 1);
+  const esperado = contar(r);
+  const problemas = Object.keys(r.errores).map((c) => `No se pudo leer "${c}"`);
+  try {
+    const leido = JSON.parse(texto) as Respaldo;
+    const real = contar(leido);
+    for (const [c, n] of Object.entries(esperado.porColeccion)) if (real.porColeccion[c] !== n) problemas.push(`"${c}": ${real.porColeccion[c] ?? 0} de ${n} registros en el archivo`);
+    if (real.sub.checklist !== esperado.sub.checklist || real.sub.informes !== esperado.sub.informes) problemas.push('Checklist o informes incompletos en el archivo');
+  } catch {
+    problemas.push('El archivo JSON generado no se pudo volver a leer');
+  }
+  const blob = new Blob([texto], { type: 'application/json' });
+  descargarBlob(blob, `Respaldo FMA AuditoriAPP ${sello(new Date(r.generado))}.json`);
+  return { ok: problemas.length === 0, tipo: 'json', bytes: blob.size, totalRegistros: esperado.totalRegistros, porColeccion: esperado.porColeccion, subcolecciones: esperado.sub, problemas };
+}
+
+/** Deja constancia del último respaldo (para el recordatorio mensual de la campana). */
+export async function registrarRespaldo(u: Usuario, v: VerificacionRespaldo, conFotos: boolean) {
+  const info: InfoRespaldo = {
+    fecha: new Date().toISOString(),
+    usuarioId: u.id,
+    usuarioNombre: u.nombre,
+    tipo: v.tipo,
+    totalRegistros: v.totalRegistros,
+    porColeccion: v.porColeccion,
+    conFotos,
+    verificado: v.ok,
+  };
+  await setDoc(doc(db, COL.config, 'respaldo'), info);
+}
+
+export async function descargarRespaldoExcel(r: Respaldo): Promise<VerificacionRespaldo> {
   const { construirRespaldoExcel } = await import('../domain/respaldoExcel');
   let logo: Uint8Array | null = null;
   try {
@@ -77,5 +127,10 @@ export async function descargarRespaldoExcel(r: Respaldo) {
     logo = null;
   }
   const bytes = construirRespaldoExcel(r, logo);
+  const esperado = contar(r);
+  const problemas = Object.keys(r.errores).map((c) => `No se pudo leer "${c}"`);
+  // Un .xlsx válido es un ZIP: comienza con "PK"
+  if (bytes.length < 1000 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) problemas.push('El archivo Excel generado está incompleto');
   descargarBlob(new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Respaldo FMA AuditoriAPP ${sello(new Date(r.generado))}.xlsx`);
+  return { ok: problemas.length === 0, tipo: 'excel', bytes: bytes.length, totalRegistros: esperado.totalRegistros, porColeccion: esperado.porColeccion, subcolecciones: esperado.sub, problemas };
 }

@@ -1,8 +1,9 @@
+import { firmasPdf } from '../lib/firmas';
 import { imagenAJpeg } from '../lib/pdf';
 import { construirProgramaPdf, type DatosProgramaPdf } from '../domain/programaPdf';
 
 export async function descargarProgramaPdf(p: DatosProgramaPdf) {
-  const bytes = construirProgramaPdf(p, await imagenAJpeg('/logo-fma.png'));
+  const bytes = construirProgramaPdf(p, await imagenAJpeg('/logo-fma.png'), await firmasPdf([p.elaboradoPor, p.aprobadoPor]));
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
   const a = document.createElement('a');
   a.href = url;

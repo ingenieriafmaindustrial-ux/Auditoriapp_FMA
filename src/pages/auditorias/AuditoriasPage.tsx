@@ -11,7 +11,7 @@ import { ESTADOS_AUDITORIA } from '../../lib/constants';
 import { aniosDisponibles, anioActual, fmtFecha } from '../../lib/dates';
 import { Hojas } from '../../components/layout/SheetTabs';
 import { normalizar } from '../../lib/utils';
-import { esAdminTI, esGestor } from '../../domain/permisos';
+import { esAdminTI, esGestor, puedeEliminarAuditorias } from '../../domain/permisos';
 import { AuditoriaFormModal } from './AuditoriaFormModal';
 import { ImportarHistoricoModal } from './ImportarHistoricoModal';
 
@@ -30,6 +30,7 @@ export default function AuditoriasPage() {
   const [importar, setImportar] = useState(false);
   const [borrar, setBorrar] = useState<Auditoria | null>(null);
   const lider = esAdminTI(u);
+  const eliminador = puedeEliminarAuditorias(u);
 
   const anios = aniosDisponibles(auditorias.map((a) => a.anio));
 
@@ -95,7 +96,7 @@ export default function AuditoriasPage() {
                   <th>Auditor líder</th>
                   <th className="text-center">NC / OM</th>
                   <th>Estado</th>
-                  {lider && <th className="w-24 text-right">Acciones</th>}
+                  {eliminador && <th className="w-24 text-right">Acciones</th>}
                 </tr>
               </thead>
               <tbody>
@@ -110,7 +111,7 @@ export default function AuditoriasPage() {
                       <span className="font-semibold text-red-700">{conteo(a.id, 'NC')}</span> / <span className="font-semibold text-sky-700">{conteo(a.id, 'OM')}</span>
                     </td>
                     <td><EstadoAuditoriaBadge estado={a.estado} /></td>
-                    {lider && (
+                    {eliminador && (
                       <td className="text-right" onClick={(e) => e.stopPropagation()}>
                         <Button size="sm" variant="danger" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setBorrar(a)} aria-label={`Eliminar auditoría ${a.codigo}`}>
                           Eliminar

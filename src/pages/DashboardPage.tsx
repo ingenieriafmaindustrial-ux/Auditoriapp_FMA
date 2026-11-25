@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, BellRing, CalendarClock, CheckCircle2, ChevronRight, ClipboardList, FileSpreadsheet, FileText, FilterX, Layers, MapPin, MessageSquareWarning } from 'lucide-react';
 import { EvolucionAnual, type ConteoTipo } from '../components/charts/EvolucionAnual';
+import { CrecimientoAnual, type MesComparado } from '../components/charts/CrecimientoAnual';
 import { Versus } from '../components/charts/Versus';
 import { usePendientes } from '../hooks/usePendientes';
 import { Button, Card, EmptyState, Spinner } from '../components/ui';
@@ -20,7 +21,7 @@ import { InformeAnualModal } from './informes/InformeAnualModal';
 import { useData } from '../context/DataContext';
 import { useUsuario } from '../context/AuthContext';
 import { semaforoPlazo } from '../domain/hallazgoReglas';
-import { aniosDisponibles, anioActual, ANIO_INICIO, diasHasta, fmtFecha } from '../lib/dates';
+import { aniosDisponibles, anioActual, ANIO_INICIO, diasHasta, fmtFecha, hoyISO } from '../lib/dates';
 import type { EstadoHallazgo, Hallazgo, TipoHallazgo } from '../types';
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -58,6 +59,8 @@ export default function DashboardPage() {
   const [area, setArea] = useState('');
   const [tipo, setTipo] = useState<TipoHallazgo | ''>('');
   const [estado, setEstado] = useState<EstadoHallazgo | ''>('');
+  /** Años a comparar en el avance por área (ventana móvil que termina en el año seleccionado). */
+  const [nAnios, setNAnios] = useState(2);
 
   const pend = usePendientes();
   const anios = aniosDisponibles([...auditorias.map((a) => a.anio), ...hallazgos.map((h) => h.anio)]);
@@ -80,20 +83,6 @@ export default function DashboardPage() {
     const porTipo = base.filter((h) => !tipo || h.tipo === tipo);
     const hs = porTipo.filter((h) => !estado || h.estado === estado);
     const auds = auditorias.filter((a) => a.estado !== 'anulada' && (!sucursal || a.sucursalId === sucursal) && (anio === null || a.anio === anio) && (!area || a.areaId === area));
-
-    const temporal =
-      anio === null
-        ? Array.from({ length: Math.max(anioActual(), ...hs.map((h) => h.anio)) - ANIO_INICIO + 1 }, (_, i) => ANIO_INICIO + i).map((y) => {
-            const del = hs.filter((h) => h.anio === y);
-            return { label: String(y), valores: { NC: del.filter((h) => h.tipo === 'NC').length, OM: del.filter((h) => h.tipo === 'OM').length } };
-          })
-        : MESES.map((mes, i) => ({ mes, i }))
-            .filter(({ i }) => i >= MES_INICIO)
-            .map(({ mes, i }) => {
-              const del = hs.filter((h) => Number(h.fechaDeteccion?.slice(5, 7)) === i + 1);
-              return { label: mes, valores: { NC: del.filter((h) => h.tipo === 'NC').length, OM: del.filter((h) => h.tipo === 'OM').length } };
-            });
-    const fueraPeriodo = anio === null ? 0 : hs.filter((h) => Number(h.fechaDeteccion?.slice(5, 7)) <= MES_INICIO).length;
 
     const estados = (['no_tratada', 'en_seguimiento', 'tratada'] as EstadoHallazgo[]).map((e) => porTipo.filter((h) => h.estado === e).length);
     const baseSinArea = hallazgos.filter((h) => !h.anulado && (anio === null || h.anio === anio) && (!tipo || h.tipo === tipo) && (!estado || h.estado === estado));
@@ -121,7 +110,10 @@ export default function DashboardPage() {
     const nivel = (['BAJA', 'MEDIA', 'ALTA'] as const).map((n) => ({ key: n, label: n.charAt(0) + n.slice(1).toLowerCase(), valor: hs.filter((h) => h.nivel === n).length }));
     const nTipo = { NC: porTipo.filter((h) => h.tipo === 'NC').length, OM: porTipo.filter((h) => h.tipo === 'OM').length };
 
-    const aniosComp = Array.from({ length: Math.max(anioActual(), ...hallazgos.map((h) => h.anio)) - ANIO_INICIO + 1 }, (_, i) => ANIO_INICIO + i).slice(-4);
+    // Ventana móvil: termina en el año seleccionado (o el actual) y retrocede nAnios; se corre sola cada año.
+    const finComp = anio ?? anioActual();
+    const aniosDispComp = finComp - ANIO_INICIO + 1;
+    const aniosComp = Array.from({ length: Math.min(nAnios, aniosDispComp) }, (_, i) => finComp - Math.min(nAnios, aniosDispComp) + 1 + i);
     // Evolución anual: respeta sucursal, área, tipo y estado (no el año: compara todos los años)
     const baseComp = hallazgos.filter((h) => !h.anulado && (!sucursal || sucDe(h) === sucursal) && (!area || h.areaId === area) && (!estado || h.estado === estado));
     const conteo = (l: Hallazgo[]): ConteoTipo => ({ nc: l.filter((h) => h.tipo === 'NC').length, om: l.filter((h) => h.tipo === 'OM').length });
@@ -163,17 +155,75 @@ export default function DashboardPage() {
     // Hallazgos por norma ISO (un hallazgo puede tocar varias normas)
     const porNorma = (['ISO 9001', 'ISO 14001', 'ISO 45001'] as const).map((n) => ({ key: n, label: n, valor: hs.filter((h) => h.normas?.includes(n)).length }));
 
+    // Crecimiento: año seleccionado (o el actual) vs el anterior. Respeta sucursal, área y tipo.
+    // En el año en curso se compara "a la misma fecha" para que la variación sea pareja.
+    const anioC = anio ?? anioActual();
+    const anioP = anioC - 1;
+    const esEnCurso = anioC === anioActual();
+    const hoy = hoyISO();
+    const corte = esEnCurso ? hoy.slice(5) : '12-31';
+    const mesHoyN = Number(hoy.slice(5, 7));
+    const baseCrec = hallazgos.filter((h) => !h.anulado && enSuc(h) && (!area || h.areaId === area) && (!tipo || h.tipo === tipo));
+    const hA = baseCrec.filter((h) => h.anio === anioC);
+    const hP = baseCrec.filter((h) => h.anio === anioP);
+    const hPFecha = hP.filter((h) => !h.fechaDeteccion || h.fechaDeteccion.slice(5) <= corte);
+    const mesDe = (h: Hallazgo) => Number(h.fechaDeteccion?.slice(5, 7)) || 0;
+    const conMes = [...hA, ...hP].map(mesDe).filter(Boolean);
+    const mIni = Math.min(MES_INICIO + 1, ...conMes);
+    const mFin = 12; // siempre hasta diciembre: muestra cómo cerró el año anterior
+    const mesesComp: MesComparado[] = [];
+    for (let m = mIni; m <= Math.min(12, mFin); m++) {
+      mesesComp.push({
+        label: MESES[m - 1],
+        actual: esEnCurso && m > mesHoyN ? null : hA.filter((h) => mesDe(h) === m).length,
+        previo: hP.filter((h) => mesDe(h) === m).length,
+      });
+    }
+    const audsDe = (y: number, hasta: string) =>
+      auditorias.filter((a) => a.anio === y && a.estado !== 'anulada' && a.estado !== 'planificada' && (!sucursal || a.sucursalId === sucursal) && (!area || a.areaId === area) && (!a.fechaRealizacion || a.fechaRealizacion.slice(5) <= hasta)).length;
+    const audA = audsDe(anioC, corte);
+    const audP = audsDe(anioP, corte);
+    const ratio = (n: number, d: number) => (d ? n / d : 0);
+    const areasCrec = areasVisibles
+      .filter((ar) => !area || ar.id === area)
+      .map((ar) => ({
+        id: ar.id,
+        label: ar.nombre,
+        sub: !sucursal && ar.sucursalId ? mapa.sucursales[ar.sucursalId]?.nombre : undefined,
+        actual: hA.filter((h) => h.areaId === ar.id).length,
+        previo: hPFecha.filter((h) => h.areaId === ar.id).length,
+      }));
+    const crecimiento = {
+      anio: anioC,
+      areas: areasCrec,
+      previo: anioP,
+      meses: mesesComp,
+      totalPrevio: hP.length,
+      esEnCurso,
+      indicadores: [
+        { label: tipo ? `${tipo} detectadas` : 'Hallazgos', actual: hA.length, previo: hPFecha.length, sentido: 'neutro' as const },
+        ...(!tipo
+          ? [
+              { label: 'No conformidades', actual: hA.filter((h) => h.tipo === 'NC').length, previo: hPFecha.filter((h) => h.tipo === 'NC').length, sentido: 'malo' as const },
+              { label: 'Oport. de mejora', actual: hA.filter((h) => h.tipo === 'OM').length, previo: hPFecha.filter((h) => h.tipo === 'OM').length, sentido: 'neutro' as const },
+            ]
+          : [{ label: 'Auditorías realizadas', actual: audA, previo: audP, sentido: 'neutro' as const }]),
+        { label: tipo ? `${tipo} por auditoría` : 'Hallazgos por auditoría', actual: ratio(hA.length, audA), previo: ratio(hPFecha.length, audP), sentido: 'neutro' as const, decimales: 1 },
+      ],
+    };
+
     const abiertos = hallazgos.filter((h) => !h.anulado && enSuc(h) && h.tipo === 'NC' && h.estado !== 'tratada' && (!area || h.areaId === area) && (!tipo || h.tipo === tipo));
     return {
+      crecimiento,
       aniosComp,
+      aniosDispComp,
+      finComp,
       resumenAnual,
       evolucion,
       versus,
       porNorma,
       hs,
       auds,
-      temporal,
-      fueraPeriodo,
       estados,
       porAreaSucursal,
       porSucursal,
@@ -189,7 +239,7 @@ export default function DashboardPage() {
         .filter((e) => e.estado !== 'cancelada' && e.estado !== 'realizada' && e.estado !== 'en_curso' && (!sucursal || e.sucursalId === sucursal) && (!area || e.areaId === area) && diasHasta(e.fecha) >= 0 && diasHasta(e.fecha) <= 30)
         .sort((a, b) => a.fecha.localeCompare(b.fecha)),
     };
-  }, [hallazgos, auditorias, programa, areas, sucursales, anio, sucursal, area, tipo, estado, mapa]);
+  }, [hallazgos, auditorias, programa, areas, sucursales, anio, sucursal, area, tipo, estado, mapa, nAnios]);
 
   if (cargando) return <Spinner />;
 
@@ -341,82 +391,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ---------- Fila 1: evolución + estado ---------- */}
-      <div className="grid items-stretch gap-4 xl:grid-cols-3">
-        <Card className="flex flex-col xl:col-span-2" title={anio === null ? 'Hallazgos por año' : `Hallazgos por mes · ${anio}`} actions={anio !== null && <span className="text-xs text-zinc-500">Marzo a diciembre</span>}>
-          {d.hs.length === 0 ? vacio('Sin hallazgos para los filtros seleccionados.') : (
-            <>
-              <ColumnasApiladas datos={d.temporal} alto={260} series={seriesTipo} />
-              {d.fueraPeriodo > 0 && <p className="mt-2 text-xs text-zinc-500">{d.fueraPeriodo} hallazgo(s) de enero o febrero no se grafican (fuera del período de auditorías).</p>}
-            </>
-          )}
-        </Card>
-        <Card className="flex flex-col" title="Estado de tratamiento" actions={<span className="text-xs text-zinc-500">Clic para filtrar</span>}>
-          <div className="flex h-full items-center">
-            <Dona
-              vertical
-              tamano={170}
-              aria="Hallazgos por estado de tratamiento"
-              centroValor={`${d.pctTratados}%`}
-              centroLabel="tratados"
-              seleccionado={estado || undefined}
-              onSelect={(k) => setEstado(estado === k ? '' : (k as EstadoHallazgo))}
-              segmentos={[
-                { key: 'no_tratada', label: 'No tratada', valor: d.estados[0], color: 'var(--viz-critical)', icon: iconosEstado.no_tratada },
-                { key: 'en_seguimiento', label: 'En seguimiento', valor: d.estados[1], color: 'var(--viz-warning)', icon: iconosEstado.en_seguimiento },
-                { key: 'tratada', label: 'Tratada', valor: d.estados[2], color: 'var(--viz-good)', icon: iconosEstado.tratada },
-              ]}
-            />
-          </div>
-        </Card>
-      </div>
-
-      {/* ---------- Fila 2: composición (3 tarjetas iguales) ---------- */}
-      <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <Card className="flex flex-col" title="NC vs OM" actions={<span className="text-xs text-zinc-500">Clic para filtrar</span>}>
-          <div className="flex h-full items-center">
-            <Dona
-              tamano={150}
-              aria="Proporción de no conformidades y oportunidades de mejora"
-              centroLabel="hallazgos"
-              seleccionado={tipo || undefined}
-              onSelect={(k) => setTipo(tipo === k ? '' : (k as TipoHallazgo))}
-              segmentos={[
-                { key: 'NC', label: 'No conformidad', valor: d.nTipo.NC, color: 'var(--viz-nc)' },
-                { key: 'OM', label: 'Oport. de mejora', valor: d.nTipo.OM, color: 'var(--viz-om)' },
-              ]}
-            />
-          </div>
-        </Card>
-        <Card className="flex flex-col" title="Nivel de impacto">
-          {d.hs.length === 0 ? vacio('Sin datos.') : (
-            <div className="flex h-full flex-col justify-center">
-              <BarrasProgreso
-                filas={[
-                  { key: 'BAJA', label: 'Baja', valor: d.nivel[0].valor, color: 'var(--viz-seq-1)' },
-                  { key: 'MEDIA', label: 'Media', valor: d.nivel[1].valor, color: 'var(--viz-seq-2)' },
-                  { key: 'ALTA', label: 'Alta', valor: d.nivel[2].valor, color: 'var(--viz-seq-3)' },
-                ]}
-              />
-            </div>
-          )}
-        </Card>
-        <Card className="flex flex-col md:col-span-2 xl:col-span-1" title="Hallazgos por norma ISO" actions={<span className="text-xs text-zinc-500">Un hallazgo puede tocar varias</span>}>
-          {d.hs.length === 0 ? vacio('Sin datos.') : (
-            <div className="flex h-full flex-col justify-center">
-              <BarrasProgreso
-                filas={[
-                  { key: 'ISO 9001', label: 'ISO 9001 · Calidad', valor: d.porNorma[0].valor, color: 'var(--viz-y2)' },
-                  { key: 'ISO 14001', label: 'ISO 14001 · Medio ambiente', valor: d.porNorma[1].valor, color: 'var(--viz-good)' },
-                  { key: 'ISO 45001', label: 'ISO 45001 · Seguridad y salud', valor: d.porNorma[2].valor, color: 'var(--viz-warning)' },
-                ]}
-              />
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* ---------- Fila 3: por área (ancho completo) ---------- */}
+      {/* ---------- Fila 1: por área (ancho completo) ---------- */}
       <Card title="Hallazgos por área" actions={<span className="text-xs text-zinc-500">Clic en una columna para filtrar</span>}>
         {d.porAreaSucursal.length === 0 ? vacio('Sin áreas para los filtros seleccionados.') : (
           <div className={'grid gap-6 ' + (d.porAreaSucursal.length > 1 ? 'xl:grid-cols-2' : '')}>
@@ -441,7 +416,7 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      {/* ---------- Fila 4: sucursales (detalle + cara a cara) ---------- */}
+      {/* ---------- Fila 2: sucursales (detalle + cara a cara) ---------- */}
       <div className="grid items-stretch gap-4 xl:grid-cols-2">
         <Card className="flex flex-col" title="Por sucursal" actions={<span className="text-xs text-zinc-500">Clic para filtrar</span>}>
           <ul className="flex h-full flex-col justify-center gap-3">
@@ -482,9 +457,104 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* ---------- Fila 5: avance anual ---------- */}
-      <Card title={`Avance anual · ${d.aniosComp[0]}–${d.aniosComp[d.aniosComp.length - 1]}`} actions={<span className="text-xs text-zinc-500">{tipo ? `Solo ${tipo}` : 'NC + OM'}{sucursal ? ` · ${mapa.sucursales[sucursal]?.nombre}` : ''}</span>}>
-        <EvolucionAnual anios={d.aniosComp} resumen={d.resumenAnual} filas={d.evolucion} tipo={tipo} />
+      {/* ---------- Fila 3: crecimiento año actual vs anterior ---------- */}
+      <Card
+        title={`Crecimiento · ${d.crecimiento.anio} vs ${d.crecimiento.previo}`}
+        actions={<span className="text-xs text-zinc-500">{d.crecimiento.esEnCurso ? `A la misma fecha (${fmtFecha(hoyISO()).slice(0, 5)})` : 'Año completo'}{tipo ? ` · Solo ${tipo}` : ''}{sucursal ? ` · ${mapa.sucursales[sucursal]?.nombre}` : ''}</span>}
+      >
+        <CrecimientoAnual
+          anio={d.crecimiento.anio}
+          previo={d.crecimiento.previo}
+          meses={d.crecimiento.meses}
+          indicadores={d.crecimiento.indicadores}
+          areas={d.crecimiento.areas}
+          onArea={(id) => setArea(area === id ? '' : id)}
+          nota={d.crecimiento.esEnCurso ? `${d.crecimiento.previo} cerró con ${d.crecimiento.totalPrevio} hallazgo(s) en total. Las cifras de arriba comparan ambos años hasta el mismo día.` : undefined}
+        />
+      </Card>
+
+      {/* ---------- Composición: 4 tarjetas compactas en línea ---------- */}
+      <div className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Card className="flex flex-col" title="Estado de tratamiento" actions={<span className="text-xs text-zinc-500">Clic para filtrar</span>}>
+          <div className="flex h-full items-center">
+            <Dona
+              vertical
+              tamano={130}
+              aria="Hallazgos por estado de tratamiento"
+              centroValor={`${d.pctTratados}%`}
+              centroLabel="tratados"
+              seleccionado={estado || undefined}
+              onSelect={(k) => setEstado(estado === k ? '' : (k as EstadoHallazgo))}
+              segmentos={[
+                { key: 'no_tratada', label: 'No tratada', valor: d.estados[0], color: 'var(--viz-critical)', icon: iconosEstado.no_tratada },
+                { key: 'en_seguimiento', label: 'En seguimiento', valor: d.estados[1], color: 'var(--viz-warning)', icon: iconosEstado.en_seguimiento },
+                { key: 'tratada', label: 'Tratada', valor: d.estados[2], color: 'var(--viz-good)', icon: iconosEstado.tratada },
+              ]}
+            />
+          </div>
+        </Card>
+        <Card className="flex flex-col" title="NC vs OM" actions={<span className="text-xs text-zinc-500">Clic para filtrar</span>}>
+          <div className="flex h-full items-center">
+            <Dona
+              vertical
+              tamano={130}
+              aria="Proporción de no conformidades y oportunidades de mejora"
+              centroLabel="hallazgos"
+              seleccionado={tipo || undefined}
+              onSelect={(k) => setTipo(tipo === k ? '' : (k as TipoHallazgo))}
+              segmentos={[
+                { key: 'NC', label: 'No conformidad', valor: d.nTipo.NC, color: 'var(--viz-nc)' },
+                { key: 'OM', label: 'Oport. de mejora', valor: d.nTipo.OM, color: 'var(--viz-om)' },
+              ]}
+            />
+          </div>
+        </Card>
+        <Card className="flex flex-col" title="Nivel de impacto">
+          {d.hs.length === 0 ? vacio('Sin datos.') : (
+            <div className="flex h-full flex-col justify-center">
+              <BarrasProgreso
+                filas={[
+                  { key: 'BAJA', label: 'Baja', valor: d.nivel[0].valor, color: 'var(--viz-seq-1)' },
+                  { key: 'MEDIA', label: 'Media', valor: d.nivel[1].valor, color: 'var(--viz-seq-2)' },
+                  { key: 'ALTA', label: 'Alta', valor: d.nivel[2].valor, color: 'var(--viz-seq-3)' },
+                ]}
+              />
+            </div>
+          )}
+        </Card>
+        <Card className="flex flex-col" title="Por norma ISO" actions={<span className="text-xs text-zinc-500" title="Un hallazgo puede tocar varias normas">Puede tocar varias</span>}>
+          {d.hs.length === 0 ? vacio('Sin datos.') : (
+            <div className="flex h-full flex-col justify-center">
+              <BarrasProgreso
+                filas={[
+                  { key: 'ISO 9001', label: 'ISO 9001 · Calidad', valor: d.porNorma[0].valor, color: 'var(--viz-y2)' },
+                  { key: 'ISO 14001', label: 'ISO 14001 · Medio ambiente', valor: d.porNorma[1].valor, color: 'var(--viz-good)' },
+                  { key: 'ISO 45001', label: 'ISO 45001 · Seguridad y salud', valor: d.porNorma[2].valor, color: 'var(--viz-warning)' },
+                ]}
+              />
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* ---------- Detalle por área y año ---------- */}
+      <Card
+        title={`Avance anual por área · ${d.aniosComp[0]}–${d.aniosComp[d.aniosComp.length - 1]}`}
+        actions={
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-zinc-500">{tipo ? `Solo ${tipo}` : 'NC + OM'}{sucursal ? ` · ${mapa.sucursales[sucursal]?.nombre}` : ''}</span>
+            {d.aniosDispComp > 2 && (
+              <Segmentado
+                etiqueta="Años a comparar"
+                valor={Math.min(nAnios, d.aniosDispComp)}
+                onChange={setNAnios}
+                opciones={Array.from({ length: Math.min(4, d.aniosDispComp) - 1 }, (_, i) => i + 2).map((n) => ({ v: n, label: `${d.finComp - n + 1}–${d.finComp}` }))}
+              />
+            )}
+          </span>
+        }
+      >
+        <EvolucionAnual conResumen={false} anios={d.aniosComp} resumen={d.resumenAnual} filas={d.evolucion} tipo={tipo} />
       </Card>
 
       {/* ---------- Fila 6: seguimiento ---------- */}

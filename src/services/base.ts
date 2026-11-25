@@ -27,6 +27,9 @@ export const COL = {
   aprendizaje: 'aprendizaje',
   presencia: 'presencia',
   programa: 'programa',
+  firmas: 'firmas',
+  errores: 'errores',
+  reportes: 'reportes',
 } as const;
 
 export const colRef = (name: string) => collection(db, name);
